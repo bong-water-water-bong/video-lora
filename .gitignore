@@ -1,0 +1,6 @@
+# Video-lora is now a pointer to 1bit-systems/engine/video/
+# See README.md for build instructions
+*.o
+*.out
+video_engine
+.DS_Store
