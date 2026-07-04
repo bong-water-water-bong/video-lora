@@ -29,7 +29,13 @@ class AnimateDiffVideo(VideoPipeline):
             torch_dtype=torch.float16 if device == "cuda" else torch.float32,
         )
         self.pipe.scheduler = LCMScheduler.from_config(self.pipe.scheduler.config)
-        self.pipe.enable_model_cpu_offload()
+        if device == "cpu":
+            self.pipe.to("cpu")
+        else:
+            try:
+                self.pipe.enable_model_cpu_offload()
+            except Exception:
+                self.pipe.to(device)
         self.device = device
 
     def generate(
