@@ -1,73 +1,55 @@
-# Vulkan Compute Backend for SD1.5 / AnimateDiff
+# Vulkan Compute Backend (Pure Zig)
 
-Low-level Vulkan compute shaders for accelerated video generation,
-inspired by the Zinc engine's architecture but targeting diffusion models.
+Low-level Vulkan compute shaders for SD1.5/AnimateDiff inference.
+Zero Python, zero C — pure Zig + GLSL, following the Zinc engine's architecture.
+
+## Quick Start
+
+```bash
+cd video-lora/vulkan
+zig build run -- --prompt "a cat walking, cinematic lighting" --frames 8
+zig build run -- --help
+```
 
 ## Architecture
 
 ```
 vulkan/
-├── shaders/          # GLSL compute shaders (compiled to SPIR-V via glslc)
-│   ├── conv2d.comp           # 2D convolution (UNet res/blocks)
-│   ├── group_norm.comp       # Group normalization
-│   ├── silu.comp             # SiLU activation
-│   ├── attention.comp        # Self-attention / cross-attention
-│   ├── elementwise.comp      # Add, multiply, scale
-│   ├── upsample.comp         # Nearest-neighbor upsample
-│   ├── downsample.comp       # Average pool downsample
-│   ├── lora_merge.comp       # Fuse LoRA weights into base weights
-│   ├── vae_decoder.comp      # VAE decoder conv
-│   └── time_embed.comp       # Time step embedding
-├── src/              # C Vulkan wrapper (called from Python via ctypes)
-│   ├── vk_ctx.h              # Vulkan context (device, queue, memory)
-│   ├── vk_ctx.c              # Context implementation
-│   ├── vk_pipeline.h         # Compute pipeline management
-│   ├── vk_pipeline.c         # Pipeline implementation
-│   ├── vk_tensor.h           # Tensor abstraction (NCHW GPU buffer)
-│   ├── vk_tensor.c           # Tensor implementation
-│   ├── vk_unet.h             # SD1.5 UNet inference orchestration
-│   ├── vk_unet.c             # UNet implementation
-│   └── vk_api.h              # Single C API header for Python ctypes
-├── python/           # Python ctypes bindings
-│   ├── __init__.py
-│   ├── backend.py            # VulkanBackend — drop-in for torch.device
-│   ├── tensor.py             # VulkanTensor — GPU tensor wrapper
-│   └── unet.py               # UNet inference using Vulkan
-├── build_ci.sh       # CI build script (glslc + gcc)
-└── Makefile           # Build targets
+├── build.zig           # Zig build — compiles shaders + links libvulkan
+├── src/
+│   ├── main.zig        # CLI entry point
+│   ├── vulkan/
+│   │   ├── vk.zig          # Vulkan handle types
+│   │   ├── instance.zig    # Device, queue, memory
+│   │   ├── pipeline.zig    # SPIR-V compute pipeline
+│   │   └── buffer.zig      # Device buffer + NCHW tensor
+│   └── sd/
+│       ├── conv.zig        # Conv2d dispatcher
+│       ├── attention.zig   # Self/cross-attention dispatcher
+│       └── lora.zig        # LoRA weight fusor
+└── shaders/             # GLSL compute → SPIR-V (via glslc)
+    ├── conv2d.comp
+    ├── group_norm.comp
+    ├── silu.comp
+    ├── elementwise.comp
+    ├── attention.comp
+    └── lora_merge.comp
 ```
 
 ## Build Dependencies
 
-- `glslc` (from Vulkan SDK or `shaderc` package)
-- `gcc` or `clang` with `-lvulkan`
-- Vulkan headers + loader (`libvulkan-dev`)
+- **Zig 0.15.2+** (`zig version`)
+- **Vulkan loader** (`libvulkan-dev` or `vulkan-loader`)
+- **glslc** (from Vulkan SDK or `shaderc`)
 
-```bash
-make shaders   # compile .comp → .spv
-make lib       # build libvk_diffusion.so
-make test      # run sanity checks
-```
+## Adding a New Shader
 
-## Calling Convention (Python → C)
+1. Write `shaders/my_op.comp` following the GLSL pattern below
+2. Add the name to the `shader_names` array in `build.zig`
+3. Create a dispatcher in `src/sd/` that wraps it
 
-```python
-from vulkan.python.backend import VulkanBackend
+### Shader Pattern
 
-# Drop-in replacement for torch.device("cuda")
-device = VulkanBackend()
-
-# Run UNet inference
-noise = device.tensor(batch, 4, 64, 64)  # latent noise
-text_emb = device.tensor(1, 77, 768)      # CLIP text embedding
-ts = device.tensor([timestep])            # timestep
-
-latent = device.unet(noise, text_emb, ts)  # → denoised latent
-```
-
-## Shader Pattern
-
-All shaders follow Zinc's pattern:
 ```glsl
 #version 460
 layout(local_size_x = 64) in;
@@ -75,17 +57,26 @@ layout(local_size_x = 64) in;
 layout(set = 0, binding = 0) buffer Input  { float in_data[]; };
 layout(set = 0, binding = 1) buffer Output { float out_data[]; };
 
-layout(push_constant) uniform PushConstants {
-    uint N;        // total elements
-    uint C;        // channels
-    uint H;        // height
-    uint W;        // width
-    uint stride;   // conv stride
+layout(push_constant) uniform Push {
+    uint N;
+    // ... per-operation params
 };
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
     if (idx >= N) return;
-    // ... compute ...
+    // compute...
 }
 ```
+
+## Roadmap
+
+| Phase | What | Status |
+|-------|------|--------|
+| 1 | GLSL shaders (conv, norm, act, attn, lora) | ✅ 6 shaders compiled to SPIR-V |
+| 2 | Zig Vulkan context + buffers | ✅ instance.zig, buffer.zig |
+| 3 | SPIR-V pipeline management | ✅ pipeline.zig |
+| 4 | Conv2d / attention dispatchers | 🔧 scaffolded — need full descriptor wiring |
+| 5 | UNet forward pass orchestration | 📋 |
+| 6 | AnimateDiff temporal attention | 📋 |
+| 7 | LoRA fusion at load time | 📋 |

@@ -27,7 +27,11 @@ dev = [
     "mypy>=1.10",
 ]
 wan = [
-    # videox-fun from git (install manually: pip install videox-fun@git+https://github.com/ali-vilab/VidGen.git)
+    # videox-fun from git (install manually)
+]
+vulkan = [
+    # zig build -p $PWD/install  (builds video-lora-vk binary)
+    # No Python deps — pure Zig + GLSL
 ]
 ltx = [
     "ltx-video>=0.9",

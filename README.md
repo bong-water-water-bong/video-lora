@@ -14,18 +14,27 @@ Video generation with LoRA support on Strix Halo. Supports **Wan2.2**, **LTX-Vid
 
 ## Quick Start
 
+### Python (CPU — works everywhere)
+
 ```bash
 pip install -e ".[dev]"
 
-# Wan2.2 with reward LoRA
-python -m video_lora generate --model wan --prompt "cinematic dolly zoom through cherry blossoms" --lora alibaba-pai/Wan2.2-Fun-Reward-LoRAs
+# AnimateDiff (SD1.5 + motion module) on CPU
+python -m video_lora generate --model animatediff --prompt "cat walking, cinematic" --frames 8
 
-# LTX-Video with detailer LoRA
-python -m video_lora generate --model ltx --prompt "astronaut in jungle, muted colors" --lora Lightricks/LTX-Video-ICLoRA-detailer-13b-0.9.8
-
-# AnimateDiff with motion LoRA
-python -m video_lora generate --model animatediff --prompt "panda eating bamboo" --lora guoyww/animatediff-motion-lora-zoom-in
+# List available models and LoRAs
+python -m video_lora list-models
 ```
+
+### Zig + Vulkan (GPU — Strix Halo Radeon 8060S)
+
+```bash
+cd vulkan
+zig build run -- --prompt "cinematic dolly zoom through cherry blossoms" --frames 16
+zig build run -- --prompt "cat walking" --lora ./motion-lora.safetensors
+```
+
+Requires Zig 0.15.2+ and `glslc` (for shader compilation).
 
 ## Project Structure
 
