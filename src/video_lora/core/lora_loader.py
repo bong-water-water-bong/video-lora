@@ -20,7 +20,7 @@ def load_lora_into_pipe(
     - Local directories with multiple LoRAs
 
     Args:
-        pipe: A diffusers pipeline (AnimateDiff, Wan2.2, LTX-Video, etc.)
+        pipe: A diffusers pipeline (AnimateDiff, Wan2.2, LTX-Video, CogVideoX, etc.)
         lora_path: HF repo ID, local path, or .safetensors file
         weight: LoRA merge weight (0.0 = no effect, 1.0 = full effect)
         adapter_name: Name for the adapter (for multiple LoRAs)
@@ -44,4 +44,26 @@ def load_lora_into_pipe(
         pipe.set_adapter_weight(adapter_name, weight)
 
     pipe.fuse_lora(adapter_names=[adapter_name], lora_scale=weight)
+    return pipe
+
+
+def load_multiple_loras(
+    pipe,
+    lora_paths: list[Union[str, Path]],
+    weights: Optional[list[float]] = None,
+):
+    """Load multiple LoRAs into a pipeline with individual weights.
+
+    Args:
+        pipe: A diffusers pipeline
+        lora_paths: List of HF repo IDs, local paths, or .safetensors files
+        weights: Optional list of weights for each LoRA (default: 0.7 each)
+    """
+    if weights is None:
+        weights = [0.7] * len(lora_paths)
+
+    for i, (lora_path, weight) in enumerate(zip(lora_paths, weights)):
+        adapter_name = f"adapter_{i}"
+        load_lora_into_pipe(pipe, lora_path, weight, adapter_name=adapter_name)
+
     return pipe

@@ -1,28 +1,27 @@
-"""Wan2.2 pipeline — reward LoRAs + camera control."""
+"""CogVideoX pipeline — transformer-based video generation with coherent motion."""
 
 from pathlib import Path
 from typing import Optional
 
 import torch
-from diffusers import DiffusionPipeline
+from diffusers import CogVideoXPipeline
 from diffusers.utils import export_to_video
-from tqdm import tqdm
 
 from ..core.pipeline import VideoPipeline
 
 
-class WanVideo(VideoPipeline):
-    """Wan2.2 text-to-video / image-to-video with LoRA support."""
+class CogVideoXVideo(VideoPipeline):
+    """CogVideoX with transformer LoRA support (2B / 5B variants)."""
 
     def __init__(
         self,
-        model_id: str = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+        model_id: str = "THUDM/CogVideoX-2b",
         device: Optional[str] = None,
     ):
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self.pipe = DiffusionPipeline.from_pretrained(
+        self.pipe = CogVideoXPipeline.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
         )
@@ -54,7 +53,7 @@ class WanVideo(VideoPipeline):
         num_inference_steps: int = 50,
     ) -> Path:
         if output is None:
-            output = Path(f"wan_{abs(hash(prompt))}.mp4")
+            output = Path(f"cogvideo_{abs(hash(prompt))}.mp4")
 
         if lora_path:
             self.load_lora(lora_path, lora_weight)
@@ -66,17 +65,16 @@ class WanVideo(VideoPipeline):
             num_frames=num_frames,
             width=width,
             height=height,
+            guidance_scale=6.0,
             num_inference_steps=num_inference_steps,
             generator=generator,
         )
-
-        # Image-to-video: pass input image
         if input_image:
             from PIL import Image
             kwargs["image"] = Image.open(input_image)
 
-        # Progress callback
         if progress:
+            from tqdm import tqdm
             pbar = tqdm(total=num_inference_steps, desc="Denoising", unit="step")
             kwargs["callback"] = lambda step, _ts, _latents: pbar.update(1)
             kwargs["callback_steps"] = 1
@@ -85,7 +83,6 @@ class WanVideo(VideoPipeline):
 
         if progress:
             pbar.close()
-
         export_to_video(video, str(output), fps=8)
         return output
 

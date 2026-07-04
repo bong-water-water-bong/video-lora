@@ -7,7 +7,7 @@ allow-direct-references = true
 
 [project]
 name = "video-lora"
-version = "0.1.0"
+version = "0.2.0"
 description = "Video generation with LoRA support — Wan2.2, LTX-Video, AnimateDiff, CogVideoX"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,6 +18,8 @@ dependencies = [
     "safetensors>=0.4",
     "opencv-python>=4.9",
     "pillow>=10.4",
+    "tqdm>=4.66",
+    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
@@ -25,19 +27,27 @@ dev = [
     "pytest>=8",
     "ruff>=0.6",
     "mypy>=1.10",
+    "pytest-benchmark>=4.0",
 ]
 wan = [
-    # videox-fun from git (install manually)
-]
-vulkan = [
-    # zig build -p $PWD/install  (builds video-lora-vk binary)
-    # No Python deps — pure Zig + GLSL
+    # Wan2.2 extra deps (videox-fun from git — install manually if needed)
 ]
 ltx = [
     "ltx-video>=0.9",
 ]
 animate = [
     "imageio[ffmpeg]>=2.34",
+]
+cogvideo = [
+    # CogVideoX uses core diffusers — no extra deps needed
+]
+all = [
+    "ltx-video>=0.9",
+    "imageio[ffmpeg]>=2.34",
+]
+vulkan = [
+    # zig build -p $PWD/install  (builds video-lora-vk binary)
+    # No Python deps — pure Zig + GLSL + glslc
 ]
 
 [tool.ruff]
@@ -47,6 +57,7 @@ target-version = "py311"
 [tool.mypy]
 python_version = "3.11"
 strict = true
+ignore_missing_imports = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/video_lora"]

@@ -1,4 +1,4 @@
-//! Conv2d dispatcher — launches the conv2d.comp shader with full descriptor wiring.
+//! Attention dispatcher — launches the attention.comp shader for self-attention.
 
 const std = @import("std");
 const c = @cImport({
@@ -11,20 +11,18 @@ const Buffer = @import("../vulkan/buffer.zig").Buffer;
 const Tensor = @import("../vulkan/buffer.zig").Tensor;
 
 const PushConstants = extern struct {
-    in_channels: u32,
-    out_channels: u32,
-    H: u32,
-    W: u32,
-    K: u32,
-    pad: u32,
-    groups: u32,
+    N: u32,
+    dim: u32,
+    num_heads: u32,
+    head_dim: u32,
+    scale: f32,
 };
 
 pipeline: Pipeline,
 descriptor_pool: c.VkDescriptorPool,
 descriptor_set: c.VkDescriptorSet,
 
-pub fn create(inst: *const Instance, spirv: []const u8) !Conv2d {
+pub fn create(inst: *const Instance, spirv: []const u8) !Attention {
     const bindings = [_]c.VkDescriptorSetLayoutBinding{
         .{ .binding = 0, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_COMPUTE_BIT },
         .{ .binding = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = 1, .stageFlags = c.VK_SHADER_STAGE_COMPUTE_BIT },
@@ -56,7 +54,7 @@ pub fn create(inst: *const Instance, spirv: []const u8) !Conv2d {
     };
     _ = c.vkAllocateDescriptorSets(inst.device, &alloc_info, &descriptor_set);
 
-    return Conv2d{
+    return Attention{
         .pipeline = pipe,
         .descriptor_pool = descriptor_pool,
         .descriptor_set = descriptor_set,
@@ -64,73 +62,54 @@ pub fn create(inst: *const Instance, spirv: []const u8) !Conv2d {
 }
 
 pub fn dispatch(
-    self: *Conv2d,
+    self: *Attention,
     cmd: vk.VkCommandBuffer,
-    input: *const Tensor,
-    weights: *const Buffer,
-    bias: *const Buffer,
-    output: *Tensor,
-    in_c: u32,
-    out_c: u32,
-    H: u32,
-    W: u32,
+    q: *const Tensor,
+    k: *const Tensor,
+    v: *const Tensor,
+    o: *Tensor,
+    N: u32,
+    dim: u32,
+    num_heads: u32,
 ) void {
+    const head_dim = dim / num_heads;
+
     // Write descriptors
-    const input_descriptor = c.VkDescriptorBufferInfo{
-        .buffer = input.buffer.buffer,
-        .offset = 0,
-        .range = input.buffer.size,
-    };
-    const weights_descriptor = c.VkDescriptorBufferInfo{
-        .buffer = weights.buffer,
-        .offset = 0,
-        .range = weights.size,
-    };
-    const bias_descriptor = c.VkDescriptorBufferInfo{
-        .buffer = bias.buffer,
-        .offset = 0,
-        .range = bias.size,
-    };
-    const output_descriptor = c.VkDescriptorBufferInfo{
-        .buffer = output.buffer.buffer,
-        .offset = 0,
-        .range = output.buffer.size,
-    };
+    const q_desc = c.VkDescriptorBufferInfo{ .buffer = q.buffer.buffer, .offset = 0, .range = q.buffer.size };
+    const k_desc = c.VkDescriptorBufferInfo{ .buffer = k.buffer.buffer, .offset = 0, .range = k.buffer.size };
+    const v_desc = c.VkDescriptorBufferInfo{ .buffer = v.buffer.buffer, .offset = 0, .range = v.buffer.size };
+    const o_desc = c.VkDescriptorBufferInfo{ .buffer = o.buffer.buffer, .offset = 0, .range = o.buffer.size };
 
     const writes = [_]c.VkWriteDescriptorSet{
-        .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = self.descriptor_set, .dstBinding = 0, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &input_descriptor },
-        .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = self.descriptor_set, .dstBinding = 1, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &weights_descriptor },
-        .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = self.descriptor_set, .dstBinding = 2, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &bias_descriptor },
-        .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = self.descriptor_set, .dstBinding = 3, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &output_descriptor },
+        .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = self.descriptor_set, .dstBinding = 0, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &q_desc },
+        .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = self.descriptor_set, .dstBinding = 1, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &k_desc },
+        .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = self.descriptor_set, .dstBinding = 2, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &v_desc },
+        .{ .sType = c.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = self.descriptor_set, .dstBinding = 3, .descriptorCount = 1, .descriptorType = c.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, .pBufferInfo = &o_desc },
     };
     c.vkUpdateDescriptorSets(self.pipeline.device, 4, &writes, 0, null);
 
-    // Bind pipeline + descriptors
+    // Bind
     c.vkCmdBindPipeline(cmd, c.VK_PIPELINE_BIND_POINT_COMPUTE, self.pipeline.pipeline);
     c.vkCmdBindDescriptorSets(cmd, c.VK_PIPELINE_BIND_POINT_COMPUTE, self.pipeline.pipeline_layout, 0, 1, @ptrCast(&self.descriptor_set), 0, null);
 
-    // Push constants: 3x3 conv, stride 1, padding 1
+    // Push constants
     const pk = PushConstants{
-        .in_channels = in_c,
-        .out_channels = out_c,
-        .H = H,
-        .W = W,
-        .K = 3,
-        .pad = 1,
-        .groups = 1,
+        .N = N,
+        .dim = dim,
+        .num_heads = num_heads,
+        .head_dim = head_dim,
+        .scale = 1.0 / @sqrt(@as(f32, @floatFromInt(head_dim))),
     };
     c.vkCmdPushConstants(cmd, self.pipeline.pipeline_layout, c.VK_SHADER_STAGE_COMPUTE_BIT, 0, @sizeOf(PushConstants), @ptrCast(&pk));
 
-    // Dispatch: one workgroup per output pixel (8x8 tile)
-    const gx = (W + 7) / 8;
-    const gy = (H + 7) / 8;
-    const gz = out_c;
-    c.vkCmdDispatch(cmd, gx, gy, gz);
+    // Dispatch: one workgroup per (position, head)
+    // Each workgroup handles head_dim=64 threads
+    c.vkCmdDispatch(cmd, N, num_heads, 1);
 }
 
-pub fn deinit(self: *Conv2d) void {
+pub fn deinit(self: *Attention) void {
     c.vkDestroyDescriptorPool(self.pipeline.device, self.descriptor_pool, null);
     self.pipeline.deinit();
 }
 
-const Conv2d = @This();
+const Attention = @This();

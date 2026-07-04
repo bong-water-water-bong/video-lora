@@ -19,8 +19,11 @@ class VideoPipeline(ABC):
         height: int = 480,
         seed: Optional[int] = None,
         output: Optional[Path] = None,
+        input_image: Optional[Path] = None,
+        progress: bool = True,
+        num_inference_steps: int = 50,
     ) -> Path:
-        """Generate a video from a text prompt, optionally with a LoRA."""
+        """Generate a video from a text prompt (and optional image), optionally with a LoRA."""
         ...
 
     @abstractmethod
