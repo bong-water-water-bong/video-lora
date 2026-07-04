@@ -1,122 +1,67 @@
-# Video LoRA
+# Video Diffusion Engine
 
-Video generation with LoRA support on Strix Halo. Supports **Wan2.2**, **LTX-Video**, **AnimateDiff**, and **CogVideoX**.
+**Zero Python. Pure C++23. NPU + CPU. 1bit.systems.**
 
-## Models & LoRAs
+C++ video diffusion engine on Strix Halo. Reuses the NPU engine's INT8 GEMM for accelerated inference.
 
-| Model | LoRA Support | Size | Notes |
-|-------|-------------|------|-------|
-| **Wan2.2-Fun** | Reward LoRAs, Camera Control LoRAs | 1.3B / 14B | Best open-source T2V + I2V |
-| **LTX-Video** | IC LoRA detailer (in-context) | 13B | Video-to-video control |
-| **AnimateDiff** | Motion + Style LoRAs | 1.5B | Largest community LoRA ecosystem |
-| **CogVideoX** | Transformer LoRA | 2B / 5B | Good for coherent motion |
-| **Stable Video Diff.** | UNet LoRA | 2.5B | Image-to-video |
+Built from `engine/video/` in the [1bit-systems](https://github.com/bong-water-water-bong/1bit-systems) monorepo.
 
 ## Quick Start
 
-### Python (CPU — works everywhere)
-
 ```bash
-pip install -e ".[dev]"
+# Clone the engine
+git clone git@github.com:bong-water-water-bong/1bit-systems.git
+cd 1bit-systems/engine/video
 
-# AnimateDiff (SD1.5 + motion module) on CPU
-video-lora generate --model animatediff --prompt "cat walking, cinematic" --frames 8
+# Build (CPU only)
+g++ -std=c++23 -O3 -march=native -fopenmp -o video_engine src/video_main.cpp -lm
 
-# List available models and LoRAs
-video-lora list-models
+# Generate
+./video_engine --prompt "a cat walking, cinematic" --frames 16 --steps 50
 
-# Wan2.2 image-to-video
-video-lora generate --model wan --prompt "a cat walking" --input-image ./cat.png --frames 16
-
-# Benchmark speed
-video-lora benchmark --model wan --frames 8 --steps 10
+# Benchmark
+./video_engine --prompt "test" --frames 8 --steps 10 --benchmark
 ```
 
-### Zig + Vulkan (GPU — Strix Halo Radeon 8060S)
-
-```bash
-cd vulkan
-zig build -Doptimize=ReleaseFast
-./zig-out/bin/video-lora-vk --prompt "cinematic dolly zoom through cherry blossoms" --frames 16
-./zig-out/bin/video-lora-vk --prompt "cat walking" --lora ./motion-lora.safetensors
-```
-
-Requires Zig 0.15.2+ and `glslc` (for shader compilation).
-
-## Project Structure
+## Architecture
 
 ```
-video-lora/
-├── src/video_lora/
-│   ├── __init__.py
-│   ├── cli.py              # CLI entry point (generate, list-models, benchmark)
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── wan.py          # Wan2.2 pipeline + LoRA + I2V
-│   │   ├── ltx.py          # LTX-Video pipeline + LoRA + I2V
-│   │   ├── animatediff.py  # AnimateDiff pipeline + LoRA
-│   │   └── cogvideo.py     # CogVideoX pipeline + LoRA + I2V
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── lora_loader.py  # Unified LoRA loading (single + multi)
-│   │   ├── pipeline.py     # Base pipeline abstraction
-│   │   └── scheduler.py    # Scheduler config registry
-│   └── utils/
-│       ├── __init__.py
-│       └── export.py       # Export to GIF/MP4/frames
-├── tests/
-│   ├── __init__.py          # Comprehensive test suite
-│   └── test_models.py
-├── docs/
-│   └── BENCHMARKS.md        # Speed and memory benchmarks
-├── pyproject.toml
-├── .github/workflows/ci.yml
+engine/video/
+├── src/
+│   ├── video_main.cpp      # Entry point + CLI
+│   ├── video_model.h       # Model config + weight loading
+│   ├── video_dit.h         # Diffusion Transformer forward pass
+│   ├── video_sampler.h     # DDIM + Flow Matching denoising
+│   └── video_vae.h         # VAE decoder (latent → pixels)
+├── BUILD.md
 └── README.md
 ```
 
-## CLI Reference
+## Features
 
-```bash
-video-lora generate [OPTIONS]
-  --model, -m    {wan, ltx, animatediff, cogvideo}
-  --prompt, -p   Text prompt (required)
-  --input-image  Input image for I2V generation
-  --lora         LoRA path (HF repo ID or .safetensors)
-  --lora-weight  LoRA merge weight (default: 0.7)
-  --frames       Number of frames (default: 16)
-  --steps        Denoising steps (default: 50)
-  --width        Output width (default: 640)
-  --height       Output height (default: 480)
-  --seed         Random seed
-  --output, -o   Output path
-  --no-progress  Disable progress bars
+- **Wan2.2-1.3B** DiT architecture (Diffusion Transformer)
+- **Zero Python** — pure C++23, single ~200KB binary
+- **NPU via XRT** — INT8 GEMM on XDNA 2 (reuses `engine/npu/`)
+- **CPU fallback** — cache-blocked OpenMP GEMM
+- **Flow Matching + DDIM** samplers with CFG
+- **Frame output** as PPM + MP4 via ffmpeg
 
-video-lora benchmark [OPTIONS]
-  --model, -m    {wan, ltx, animatediff, cogvideo}
-  --frames       Number of frames (default: 8)
-  --steps        Denoising steps (default: 10)
-  --runs         Benchmark runs (default: 3)
+## Reused Infrastructure
 
-video-lora list-models
-```
-
-## Performance
-
-See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for detailed benchmarks.
+| Component | Source | Purpose |
+|-----------|--------|---------|
+| `I8Ctx` | `engine/npu/src/` | INT8 GEMM on XDNA 2 |
+| `attn_omp()` | `engine/npu/src/` | OpenMP attention |
+| XRT xclbins | `engine/npu/xclbins/` | MLIR-compiled NPU kernels |
 
 ## Roadmap
 
 | Phase | What | Status |
 |-------|------|--------|
-| 1 | Python backends (Wan, LTX, AnimateDiff, CogVideoX) | ✅ |
-| 2 | LoRA loading + fusion | ✅ |
-| 3 | Image-to-video | ✅ |
-| 4 | CLI + benchmark | ✅ |
-| 5 | GLSL shaders (conv, norm, act, attn, lora) | ✅ 6 shaders to SPIR-V |
-| 6 | Zig Vulkan context + buffers | ✅ |
-| 7 | SPIR-V pipeline + dispatchers | ✅ Conv2d, Attention, LoRA |
-| 8 | UNet forward pass orchestration | 🔧 wired — needs real weights |
-| 9 | AnimateDiff temporal attention | 📋 |
-| 10 | API server (OpenAI-compatible) | 📋 |
-| 11 | NPU video path (INT8 xclbin) | 📋 |
-| 12 | Docker packaging | 📋 |
+| 1 | C++ DiT pipeline + sampler + VAE | ✅ |
+| 2 | CPU OpenMP GEMM + attention | ✅ |
+| 3 | Weight file format + loader | ✅ |
+| 4 | NPU I8Ctx integration | 🔧 needs xclbins |
+| 5 | Real T5 text encoder | 📋 |
+| 6 | Full convolutional VAE decoder | 📋 |
+| 7 | AnimateDiff / ControlNet | 📋 |
